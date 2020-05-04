@@ -1,7 +1,7 @@
 library(tidyverse)
 library(magrittr)
-# library(gganimate)
-# library(transformr)
+library(gganimate)
+library(transformr)
 library(rstan)
 library(loo)
 library(progress)
@@ -37,6 +37,7 @@ mods <-
                                  load_and_generate_fitfunc,
                                  progress = FALSE,
                                  .progress = TRUE))
+saveRDS(mods, file = "../fitfuncs.rds", version = 2)
 
 ## ---------------- Outputting some graphs
 
@@ -95,6 +96,24 @@ ar1 %>%
              .progress = TRUE)
     )
 
+## Rendering the animation of the AR1 model
+ar1 <-
+    ar1 %>%
+    mutate(Nyear = map_int(Data, ~ nlevels(.[["Year_fac"]])))
+
+restart_pb(nrow(ar1))
+ar1 %>%
+    with(
+        pmap(list(Data, FitFunc, DataID, Species, Population, Nyear),
+         ~ {pb$tick();
+            anim_save(animation = animate(animate_fitfunc(..1, ..2),
+                                          renderer = ffmpeg_renderer(),
+                                          nframes = 20 * ..6),
+                      filename = str_glue("../../Figures/Fitted_STAN_AR1/{..3}_{..4}_{..5}.mp4"))},
+         .progress = TRUE)
+    )
+    
+
 ## Using the new IDs
 ar1 <-
     ar1 %>%
@@ -115,9 +134,36 @@ ar1_unst <-
            Year_scale = scale_minmax(Year_index)) %>%
     ungroup()
 
+allpheno <-
+    ar1 %>%
+    select(ID, Data) %>%
+    distinct() %>%
+    unnest_legacy() %>%
+    group_by(ID) %>%
+    summarise(low95     = quantile(Pheno, probs = 0.025, type = 1),
+              up95      = quantile(Pheno, probs = 0.975, type = 1),
+              quart1    = quantile(Pheno, probs = 0.25, type = 1),
+              quart3    = quantile(Pheno, probs = 0.75, type = 1),
+              mean      = mean(Pheno)) %>%
+    mutate(weight = map(ar1[["Curve_df"]], "Y") %>%
+                    map_dbl(max),
+           ybox   = - 0.1 * weight)
+
 ## Generating the overall plot
 p <-
     ggplot(ar1_unst) +
+    geom_boxplot(data    = allpheno,
+                 mapping = aes(xmin     = low95,
+                               xlower   = quart1,
+                               xmiddle  = mean,
+                               xupper   = quart3,
+                               xmax     = up95,
+                               y        = ybox),
+                 stat = "identity",
+                 colour = "#58767f",
+                 fill = "#a7e0f0",
+                 orientation = "y",
+                 width = allpheno[["weight"]]/8) +
     geom_line(mapping   = aes(x      = Pheno,
                               y      = Y,
                               colour = Year_scale,
@@ -128,7 +174,6 @@ p <-
     labs(x = "Phenological trait", y = "Fitness trait") +
     facet_wrap(~ ID, nrow = 7, ncol = 6, scales = "free") +
     scale_size_area(name = "Counts") +
-    scale_y_continuous(limits = c(0, NA)) +
     scale_colour_gradient(low = "#0055ff", high = "#ffd500", guide = "none") +
     theme(text         = element_text(family = "Linux Biolinum O"),
           axis.text.y  = element_text(size = 14),
