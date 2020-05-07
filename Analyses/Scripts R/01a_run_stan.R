@@ -21,7 +21,7 @@ rstan_options(auto_write = TRUE)
 print(str_glue("Loading and formatting the data..."))
 
 ## Getting the data
-alldata <- readRDS("../../Data/alldata_summedFitness.rds")
+alldata <- readRDS("../../Data/alldata_final.rds")
 # NOTE Some df have quite a lot of missing IDs (up to 69%)
 
 ## Formatting the data for analysis (see 00_functions.R)

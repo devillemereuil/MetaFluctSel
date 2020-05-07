@@ -7,7 +7,7 @@ source("00_functions.R")
 
 
 ## --------------------------- Getting the data
-alldata <- readRDS("../../Data/alldata_summedFitness.rds")
+alldata <- readRDS("../../Data/alldata_final.rds")
 
 ## --------------------------- Formatting the data for analysis
 mods <- format_to_mods(alldata)
