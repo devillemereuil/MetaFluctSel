@@ -3,9 +3,7 @@ library(magrittr)
 library(rstan)
 library(progress)
 library(furrr)
-library(lme4)
 library(brms)
-library(lmerTest)
 plan(multiprocess)
 options(mc.cores = ifelse(availableCores() > 4,
                           10,
