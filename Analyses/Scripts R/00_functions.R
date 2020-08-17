@@ -248,6 +248,8 @@ get_params_to_keep <- function(mod_year, dist) {
         out <- c("omega", "t_intercept", "t_sigma", "log_w_intercept", "log_w_sigma", "ind_sigma")
     } else if (mod_year == "AR1") {
         out <- c("omega", "t_intercept", "t_sigma", "log_w_intercept", "log_w_sigma", "phi", "ind_sigma")
+    } else if (mod_year == "AR1_withtrend") {
+        out <- c("omega", "t_intercept", "t_sigma", "log_w_intercept", "log_w_sigma", "trend", "phi", "ind_sigma")
     } else if (mod_year == "FLAT") {
         out <- c("log_w_intercept", "log_w_sigma", "ind_sigma")
     }
@@ -582,7 +584,7 @@ fit_hmc <- function(data,
     # Type of model
     type_year_model <-
         model@model_name %>%
-        stringr::str_match("type([A-Z1]+)") %>%
+        stringr::str_match("type([A-Z1]+(_withtrend)?)") %>%
         pluck(2)
     
     # Grouping factors
@@ -606,6 +608,7 @@ fit_hmc <- function(data,
                  intercept  = init_log_Wmax,
                  p_zi       = init_pzi,
                  phi        = 0,
+                 trend      = 0,
                  slope      = 0,
                  t_intercept= 0,
                  t_year     = rep(0, Nyear),
@@ -673,6 +676,11 @@ fit_hmc <- function(data,
                     "log_w_intercept", "log_w_sigma", "log_w_year")
     } else if (type_year_model == "AR1") {
         params <- c("lp__", "omega", "c", "phi",
+                    "log_w_ind", "ind_sigma",
+                    "t_intercept", "t_sigma", "t_year",
+                    "log_w_intercept", "log_w_sigma", "log_w_year")
+    } else if (type_year_model == "AR1_withtrend") {
+        params <- c("lp__", "omega", "c", "phi", "trend",
                     "log_w_ind", "ind_sigma",
                     "t_intercept", "t_sigma", "t_year",
                     "log_w_intercept", "log_w_sigma", "log_w_year")
@@ -1366,18 +1374,35 @@ summarise_meta_brms <- function(model) {
         as_tibble() %>%
         select(-lp__)
     
-    # Formatting columns
-    mcmc <-
-        mcmc %>%
-        mutate(b_TaxonMammal = b_Intercept + b_TaxonMammal) %>%
-        rename(mu_Bird   = "b_Intercept",
-               mu_Mammal = "b_TaxonMammal") #%>%
-#         mutate(b_sigma_TaxonMammal = exp(b_sigma_Intercept + b_sigma_TaxonMammal),
-#                b_sigma_Intercept   = exp(b_sigma_Intercept)) %>%
-#         rename(sigma_Bird = "b_sigma_Intercept", sigma_Mammal = "b_sigma_TaxonMammal") %>%
-#         rename_all(~ str_replace(., "__Intercept", ""))
+    # Computing the estimates
+    if (model[["family"]][["link"]] == "softplus") {
+        mcmc <-
+            mcmc %>%
+            mutate(b_TaxonMammal = b_Intercept + b_TaxonMammal,
+                   v_tot         = select(., starts_with("sd"), "sigma") %>%
+                                   mutate(across(everything(), raise_to_power, 2)) %>%
+                                   rowSums(),
+                   mu_Bird       = map2_dbl(b_Intercept, v_tot,
+                                        ~  QGglmm::QGmean(mu     = .x,
+                                                          var    = .y,
+                                                          link.inv = function(x) {
+                                                              log(exp(x) + 1)
+                                                          })),
+                   mu_Mammal     = map2_dbl(b_TaxonMammal, v_tot,
+                                        ~  QGglmm::QGmean(mu     = .x,
+                                                          var    = .y,
+                                                          link.inv = function(x) {
+                                                              log(exp(x) + 1)
+                                                          })),)
+    } else {
+        mcmc <-
+            mcmc %>%
+            mutate(b_TaxonMammal = b_Intercept + b_TaxonMammal) %>%
+            rename(mu_Bird   = "b_Intercept",
+                   mu_Mammal = "b_TaxonMammal")
+    }
     
-    # Dropping the "total variance" and "sigma" field
+    # Dropping everything else other than the meta-estimates
     mcmc <- select(mcmc, mu_Bird, mu_Mammal)
     
     # Summarising the mcmc

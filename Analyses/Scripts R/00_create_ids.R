@@ -29,6 +29,13 @@ ids <-
                        levels = str_sort(ID, numeric = TRUE))) %>%
     select(ID, everything())
 
+ids <-
+    ids %>%
+    left_join(readRDS("../../Data/taxa.rds")) %>%
+    arrange(Taxon, ID) %>%
+    mutate(ID = factor(ID, levels = as.character(ID))) %>%
+    select(-Taxon)
+
 ## ----------------------- Checking the order is the same as the summary table already generated
 tbl_sum <- 
     read_csv("../../Data/Summary.csv") %>%

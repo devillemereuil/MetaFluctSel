@@ -139,6 +139,7 @@ allpheno <-
     select(ID, Data) %>%
     distinct() %>%
     unnest_legacy() %>%
+    rename(ID = `ID...1`) %>%
     group_by(ID) %>%
     summarise(low95     = quantile(Pheno, probs = 0.025, type = 1),
               up95      = quantile(Pheno, probs = 0.975, type = 1),
@@ -171,10 +172,11 @@ p <-
               size      = 1,
               alpha     = 0.5) +
     theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)) +
-    labs(x = "Phenological trait", y = "Fitness trait") +
+    labs(x = "Breeding date", y = "Fitness trait") +
     facet_wrap(~ ID, nrow = 7, ncol = 6, scales = "free") +
     scale_size_area(name = "Counts") +
     scale_colour_gradient(low = "#0055ff", high = "#ffd500", guide = "none") +
+    scale_x_date(labels = scales::date_format("%b")) +
     theme(text         = element_text(family = "Linux Biolinum O"),
           axis.text.y  = element_text(size = 14),
           axis.text.x  = element_text(size = 14),

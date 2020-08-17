@@ -164,7 +164,7 @@ write_csv(rel_square, path = "../loo_relsupport_square.csv")
 
 desc <-
     tribble(
-        ~ ID,           ~ Shape,        ~ `Fluctuations`,    ~ `Auto-correlation`,
+        ~ ID,           ~ Shape,        ~ `Fluctuations`,    ~ `Autocorrelation`,
         "NoSel",        "Flat",         "\\ding{56}",        "\\ding{56}",
         "ConstDir",     "Monotonic",    "\\ding{56}",        "\\ding{56}",
         "ConstOpt",     "Gaussian",     "\\ding{56}",        "\\ding{56}",

@@ -9,7 +9,7 @@ library(ggnewscale)
 library(grImport)
 library(patchwork)
 plan(multiprocess)
-options(mc.cores = ifelse(availableCores() > 4,
+options(mc.cores = ifelse(availableCores() > 10,
                           10,
                           availableCores()))
 filter  <- dplyr::filter
@@ -31,6 +31,19 @@ ids  <- readRDS("../FinalIDs.rds")
 # Loading the taxa
 taxa <- readRDS("../../Data/taxa.rds")
 
+# List of birds and mammals ID
+list_birds <- 
+    ids %>% 
+    left_join(taxa) %>%
+    filter(Taxon == "Bird") %>%
+    chuck("ID") %>%
+    as.character()
+list_mammals <- 
+    ids %>% 
+    left_join(taxa) %>%
+    filter(Taxon == "Mammal") %>%
+    chuck("ID") %>%
+    as.character()
 
 # Subsetting the two most complete models
 mods <-
@@ -38,9 +51,18 @@ mods <-
     left_join(loo %>% select(DataID, Species, Population, Model_Year, Delta_LOOIC, LOO_Weight)) %>%
     group_by(DataID, Species, Population) %>%
     filter(!any(Model_Year == "FLAT" & LOO_Weight > 0.5)) %>%
+    mutate(Weight_Opt = LOO_Weight[Model_Year %in% c("IID", "AR1", "VARINT")] %>%
+                        sum(),
+           Weight_Dir = LOO_Weight[Model_Year %in% c("EXPIID", "EXPAR1", "EXPVARINT")] %>%
+                        sum(),
+           Ratio_Opt_Dir = Weight_Opt / Weight_Dir,
+           Weight_Opt = Weight_Opt / (Weight_Opt + Weight_Dir),
+           Weigth_Dir = Weight_Dir / (Weight_Opt + Weight_Dir),
+           Weight_Fluct = LOO_Weight[str_detect(Model_Year, "(IID|AR1)")] %>%
+                         sum()) %>%
     ungroup() %>%
     filter(Model_Year %in% c("EXPAR1", "AR1")) %>%
-    mutate(Viable = Delta_LOOIC < 10)
+    mutate(Viable = Delta_LOOIC < 10, Keep_Theta = Ratio_Opt_Dir > 1)
 
 print("Handling optimum models")
 # Obtaining the optimum locations from the models for which there is an optimum
@@ -251,7 +273,7 @@ mcmc_meta <-
            Mean_Theta   = map(Theta, ~ apply(., 1, mean, na.rm = TRUE)),
            Dist         = ifelse(str_detect(Dist, "Binom"), "Binom", "Poisson") %>%
                           factor(levels = c("Poisson", "Binom"))) %>%
-    select(ID, Species, Taxon, Population, Dist, Mean_Theta, SD_Theta, Mean_Beta, SD_Beta, Omega) 
+    select(ID, Species, Taxon, Population, Keep_Theta, Dist, Mean_Theta, SD_Theta, Mean_Beta, SD_Beta, Omega) 
 
 # Generating 100 datasets based on the MCMC samples
 dfs_meta <-
@@ -265,22 +287,27 @@ dfs_meta <-
     nest_legacy(.key = "Df") %>%
     pluck("Df")
 
+# Sub-setting when only "Keep_Theta" datasets are wanted
+dfs_meta_keep_theta <- map(dfs_meta, ~ filter(., Keep_Theta))
+
 ## Now running the five models
 prior_n <- c(
     prior(normal(0, 20), "b"),
-    prior(normal(0, 10), "sd"),
-    prior(normal(0, 10), "Intercept", dpar = "sigma"),
-    prior(normal(0, 10), dpar = "sigma")
+    prior(normal(0, 10), "sd")
+)
+
+prior_sp <- c(
+    prior(normal(0, 10), "b"),
+    prior(normal(0, 5), "sd")
 )
 
 # Running the model for Mean Theta
 print("Running model for Mean Theta")
 form <- brmsformula(Mean_Theta ~ 1 + Taxon + (1|Species) + (1|Population),
-                    sigma ~ Taxon,
                     sparse = TRUE)
 mod_mean_theta <- 
     brm_multiple(formula    = form,
-                 data       = dfs_meta,
+                 data       = dfs_meta_keep_theta,
                  save_ranef = FALSE,
                  chains     = 2,
                  iter       = 3000,
@@ -294,7 +321,6 @@ gc()
 # Running the model for Mean Beta
 print("Running model for Mean Beta")
 form <- brmsformula(Mean_Beta ~ 1 + Taxon + (1|Species) + (1|Population),
-                    sigma ~ Taxon,
                     sparse = TRUE)
 mod_mean_beta <- 
     brm_multiple(formula    = form,
@@ -312,17 +338,17 @@ gc()
 # Running the model for SD Theta
 print("Running model for SD Theta")
 form <- brmsformula(SD_Theta  ~ 1 + Taxon + (1|Species) + (1|Population),
-                    sigma ~ Taxon,
+                    family = brmsfamily("gaussian", link = "softplus"),
                     sparse = TRUE)
 mod_sd_theta <- 
     brm_multiple(formula = form,
-                 data   = dfs_meta,
+                 data   = dfs_meta_keep_theta,
                  save_ranef = FALSE,
                  chains = 2,
                  iter   = 3000,
                  warmup = 2000,
                  thin   = 50, 
-                 prior  = prior_n)
+                 prior  = prior_sp)
 saveRDS(mod_sd_theta, file = "../mod_sd_theta.rds", version = 2)
 rm(mod_sd_theta)
 gc()
@@ -330,7 +356,7 @@ gc()
 # Running the model for SD Beta
 print("Running model for SD Beta")
 form <- brmsformula(SD_Beta ~ 1 + Taxon + (1|Species) + (1|Population),
-                    sigma ~ Taxon,
+                    family = brmsfamily("gaussian", link = "softplus"),
                     sparse = TRUE)
 mod_sd_beta <- 
     brm_multiple(formula = form,
@@ -340,7 +366,7 @@ mod_sd_beta <-
                  iter   = 3000,
                  warmup = 2000,
                  thin   = 50, 
-                 prior  = prior_n)
+                 prior  = prior_sp)
 saveRDS(mod_sd_beta, file = "../mod_sd_beta.rds", version = 2)
 rm(mod_sd_beta)
 gc()
@@ -348,20 +374,21 @@ gc()
 # Running the model for Omega
 print("Running model for Omega")
 form <- brmsformula(Omega ~ 1 + Taxon + (1|Species) + (1|Population),
-                    sigma ~ Taxon,
+                    family = brmsfamily("gaussian", link = "softplus"),
                     sparse = TRUE)
 mod_omega <- 
     brm_multiple(formula    = form,
-                 data       = dfs_meta,
+                 data       = dfs_meta_keep_theta,
                  save_ranef = FALSE,
                  chains     = 2,
                  iter       = 3000,
                  warmup     = 2000,
                  thin       = 50, 
-                 prior      = prior_n)
+                 prior      = prior_sp)
 saveRDS(mod_omega, file = "../mod_omega.rds", version = 2)
 rm(mod_omega)
 gc()
+
 
 ## Formatting the five models and extracting outputs
 
@@ -530,6 +557,11 @@ dev.off()
 
 ## ------------------------------ Plotting prob. of sign variation
 
+add_spacer <- function(limits) {
+    cut <- max(which(limits%in% list_mammals))
+    c(limits[1:cut], "", limits[(cut+1):length(limits)])
+}
+
 graph_sign <-
     point_grad %>%
     select(-ID) %>%
@@ -547,6 +579,8 @@ p_sign <-
     geom_hline(yintercept = 0, colour = "grey", alpha = 0.5) +
     geom_point(aes(x = ID, y = Median), colour = "#0055ff", size = 2) +
     ylab("Prop. of sign change") + xlab("Dataset") +
+    scale_x_discrete(breaks = levels(graph_sign[["ID"]]),
+                     limits = add_spacer) +
     scale_colour_manual(values = c("#005500", "#55aa00")) +
     coord_flip() + 
     theme(text         = element_text(family = "Linux Biolinum O", size = 22),
@@ -669,28 +703,31 @@ dev.off()
 
 ## Theta/Beta OPT with Weigths
 weights <-
-    loo %>%
+    mods %>%
+    select(-ID) %>%
     left_join(ids) %>%
-    select(ID, Model_Year, LOO_Weight) %>%
-    group_by(ID) %>%
-    summarise(Weight_Fluct = sum(LOO_Weight[str_detect(Model_Year, "(AR1)|(IID)")]),
-              Weight_Opt = sum(LOO_Weight[Model_Year %in% c("AR1", "IID", "NULL")]))
+    select(ID, Model_Year, Weight_Opt, Weight_Fluct)
 
 
 all_graph_weights <-
     all %>%
+    select(-Weight_Opt, -Weight_Fluct) %>%
     filter(Model_Year == "AR1") %>%
     select(-ID) %>%
     left_join(ids) %>%
     left_join(weights) %>%
+    left_join(taxa) %>%
     mutate(ID = fct_rev(ID)) %>%
-    select(ID, Theta, SD_Theta, Mean_Beta, SD_Beta, Weight_Fluct, Weight_Opt) %>%
+    select(ID, Theta, SD_Theta, Mean_Beta, SD_Beta, Weight_Fluct, Weight_Opt, Keep_Theta) %>%
     mutate_at(vars(contains("Beta")), ~ map(., as_tibble)) %>%
-    gather("Parameter", "Estimates", -ID, -Weight_Fluct, -Weight_Opt) %>%
+    gather("Parameter", "Estimates", -ID, -Weight_Fluct, -Weight_Opt, -Keep_Theta) %>%
     unnest(Estimates) %>%
     bind_rows(formated_meta) %>%
-    mutate(ID = factor(ID, levels = c(levels(ids[["ID"]]), "Bird", "Mammal")) %>%
-                fct_rev())
+    mutate(ID = factor(ID, levels = c("Bird", list_birds, "Mammal", list_mammals)) %>%
+                recode(Bird = "Birds", Mammal = "Mammals") %>%
+                fct_rev(),
+           Weight_Opt_censored = if_else(Keep_Theta, Weight_Opt, NA_real_),
+           Weight_Fluct_censored = if_else(Keep_Theta, Weight_Fluct, NA_real_))
 
 all_graph_weights <-
     all_graph_weights %>%
@@ -704,54 +741,96 @@ all_graph_weights <-
                            )
     )
 
+parse_bold_taxa <- function(label) {
+    label <- ifelse(label %in% c("Birds", "Mammals"),
+                    str_glue("bold({label})"),
+                    label)
+    parse(text = label)
+}
+
+add_spacer <- function(limits) {
+    cut <- which(limits == "Mammals")
+    c(limits[1:cut], "", limits[(cut+1):length(limits)])
+}
+
 p_weights <- 
     ggplot(all_graph_weights) +
     geom_hline(yintercept = 0, colour = "grey50") + 
-    geom_linerange(data = all_graph_weights %>% filter(Parameter %in% c("SD_Theta", "SD_Beta")),
+    geom_linerange(data = all_graph_weights %>%
+                          filter(Parameter == "SD_Theta"),
+                   aes(x        = ID,
+                       ymin     = Low,
+                       ymax     = Up,
+                       colour   = Weight_Fluct_censored,
+                       size     = is.na(Weight_Opt))) +
+    geom_point(data = all_graph_weights %>%
+                      filter(Parameter == "SD_Theta"),
+               aes(x = ID, y = Median, colour = Weight_Fluct_censored), size = 2) +
+    geom_linerange(data = all_graph_weights %>%
+                          filter(Parameter == "SD_Beta",
+                                 !(ID %in% c("Birds", "Mammals"))),
                    aes(x        = ID,
                        ymin     = Low,
                        ymax     = Up,
                        colour   = Weight_Fluct,
                        size     = is.na(Weight_Opt))) +
-    geom_point(data = all_graph_weights %>% filter(Parameter %in% c("SD_Theta", "SD_Beta")),
+    geom_point(data = all_graph_weights %>%
+                      filter(Parameter == "SD_Beta"),
                aes(x = ID, y = Median, colour = Weight_Fluct), size = 2) +
     scale_colour_gradient(low = "#000000",
                           high = "#ff8000",
                           name = "Fluctuation support",
-                          na.value = "#00aa00",
+                          na.value = "#aaaaaa",
                           guide = guide_colourbar(order = 2),
                           limits = c(0,1)) +
     new_scale_colour() +
-    geom_linerange(data = all_graph_weights %>% filter(Parameter %in% c("Theta")),
+    geom_linerange(data = all_graph_weights %>% 
+                          filter(Parameter == "Theta",
+                                 !(ID %in% c("Birds", "Mammals"))),
                    aes(x        = ID,
                        ymin     = Low,
                        ymax     = Up,
-                       colour   = Weight_Opt,
-                       size     = is.na(Weight_Opt))) +
-    geom_point(data = all_graph_weights %>% filter(Parameter %in% c("Theta")),
-               aes(x = ID, y = Median, colour = Weight_Opt), size = 2) +
-    geom_linerange(data = all_graph_weights %>% filter(Parameter %in% c("Mean_Beta")),
+                       colour   = Weight_Opt_censored),
+                   size = 0.8) +
+    geom_point(data = all_graph_weights %>%
+                      filter(Parameter == "Theta",
+                             !(ID %in% c("Birds", "Mammals"))),
+               aes(x = ID, y = Median, colour = Weight_Opt_censored), size = 2) +
+    geom_linerange(data = all_graph_weights %>% 
+                          filter(Parameter == "Mean_Beta",
+                                 !(ID %in% c("Birds", "Mammals"))),
                    aes(x        = ID,
                        ymin     = Low,
                        ymax     = Up,
-                       colour   = Weight_Opt,
                        size     = is.na(Weight_Opt))) +
-    geom_point(data = all_graph_weights %>% filter(Parameter %in% c("Mean_Beta")),
-               aes(x = ID, y = Median, colour = Weight_Opt), size = 2) +
-    scale_colour_gradient(low = "#000000",
-                          high = "#0080ff",
-                          name = "Optimum support",
-                          guide = guide_colourbar(order = 1),
-                          na.value = "#00aa00",
-                          limits = c(0,1)) +
-    geom_point(data = all_graph_weights %>% filter(ID %in% c("Bird", "Mammal")),
+    geom_point(data = all_graph_weights %>% 
+                      filter(Parameter == "Mean_Beta"),
+               aes(x = ID, y = Median), size = 2) +
+    scale_colour_gradientn(colours = c("#aaaaaa", "#aaaaaa", "#454d56", "#0080ff"),
+                           values = c(0, 0.499, 0.5, 1),
+                           name = "Opt vs Dir support",
+                           guide = guide_colourbar(order = 1),
+                           na.value = "#aaaaaa",
+                           limits = c(0,1)) +
+    geom_linerange(data = all_graph_weights %>%
+                          filter(ID %in% c("Birds", "Mammals")),
+                   aes(x        = ID,
+                       ymin     = Low,
+                       ymax     = Up),
+                   colour = "#00aa00",
+                   size = 1.8) +
+    geom_point(data = all_graph_weights %>%
+                      filter(ID %in% c("Birds", "Mammals")),
                aes(x = ID, y = Median),
                colour = "#00aa00",
                size = 3,
                shape = 22,
                fill = "#00aa00") +
     scale_size_discrete(guide = "none", range = c(0.8, 1.8)) +
-    scale_x_discrete(expand = expansion(add = 1)) +
+    scale_x_discrete(expand = expansion(add = 1),
+                     labels = parse_bold_taxa,
+                     breaks = levels(all_graph_weights[["ID"]]),
+                     limits = add_spacer) +
     coord_flip() +
     facet_wrap(~ Parameter_recode, scales = "free_x", labeller = label_parsed) +
     ylab("Estimates") + xlab("Data ID") +
@@ -765,7 +844,7 @@ p_weights <-
           strip.text   = element_text(family = "Linux Libertine O", size = 22),
           legend.position = "top")
 
-cairo_pdf("../../Figures/Gradients_Theta_OPT_weights.pdf", height = 11, width = 10)
+cairo_pdf("../../Figures/Gradients_Theta_OPT_weights.pdf", height = 12, width = 10)
 plot(p_weights)
 dev.off()
 
@@ -1034,8 +1113,9 @@ graph_all <-
     select(-ID) %>%
     left_join(ids) %>%
     mutate(ID = fct_rev(ID)) %>%
-    filter(Model_Year == "AR1", Viable) %>%
-    select(ID, SD_Beta, SD_Beta_Nofl, SD_Beta_Nopl, SD_Beta_Notr, CorrTZ, SD_Zbar, SD_Theta) %>%
+    filter(Model_Year == "AR1") %>%
+    select(ID, SD_Beta, SD_Beta_Nofl, SD_Beta_Nopl, SD_Beta_Notr,
+           CorrTZ, SD_Zbar, SD_Theta, Keep_Theta) %>%
     mutate(SD_Beta      = map_dbl(SD_Beta, "Median"),
            SD_Beta_Nofl = map_dbl(SD_Beta_Nofl, "Median"),
            SD_Beta_Nopl = map_dbl(SD_Beta_Nopl, "Median"),
@@ -1043,13 +1123,14 @@ graph_all <-
            CorrTZ       = map_dbl(CorrTZ, median, na.rm = TRUE),
            SD_Theta     = map_dbl(SD_Theta, median, na.rm = TRUE),
            Ratio        = SD_Zbar / SD_Theta,
-           Nudge        = if_else(CorrTZ > 0.25, -0.25, -0.05),
-           Nudge        = if_else(ID %in% c("Cca1", "Pdo", "Cca6", "Cci1", "Pma1", "Cel", "Rta", "Oca", "Cca8"), 0.2, Nudge),
-           Nudge        = if_else(ID %in% c("Pma1", "Cci2"), -0.15, Nudge))
+           Nudge        = if_else(CorrTZ > 0.25, -0.15, -0.02),
+           Nudge        = if_else(ID %in% c("Cca1", "Pdo", "Cca6", "Cci1", "Pma1", "Cel", "Rta", "Oca", "Cca8", "Cca2"), 0.2, Nudge),
+           Nudge        = if_else(ID %in% c("Tme2", "Cci2", "Pma6", "Cca9"), 0.4, Nudge),
+           Nudge        = if_else(ID %in% c("Pma1", "Nci", "Pma2"), -0.25, Nudge))
 
 p_all <-
     ggplot(graph_all) +
-    geom_abline(intercept = 0, slope = 1, colour = "grey60", size = 1) +
+    geom_abline(intercept = 0, slope = 1, colour = "grey90", size = 1) +
     geom_text_repel(aes(x = SD_Beta_Nopl, y = SD_Beta, label = ID),
                     colour = "grey50",
                     segment.colour = "grey50",
@@ -1058,9 +1139,16 @@ p_all <-
                     box.padding = 0.3,
                     min.segment.length = 0.35,
                     nudge_y = graph_all[["Nudge"]]) +
-    geom_point(aes(x = SD_Beta_Nopl, y = SD_Beta_Notr), shape = 4) +
-    geom_point(aes(x = SD_Beta_Nopl, y = SD_Beta)) +
-    geom_segment(aes(x      = SD_Beta_Nopl,
+    geom_point(data = graph_all %>% filter(Keep_Theta),
+               aes(x = SD_Beta_Nopl, y = SD_Beta_Notr),
+               shape = 4) +
+    geom_point(data = graph_all %>% filter(Keep_Theta),
+               aes(x = SD_Beta_Nopl, y = SD_Beta)) +
+    geom_point(data = graph_all %>% filter(!Keep_Theta),
+               aes(x = SD_Beta_Nopl, y = SD_Beta),
+               colour = "grey50") +
+    geom_segment(data = graph_all %>% filter(Keep_Theta),
+                 aes(x      = SD_Beta_Nopl,
                      y      = SD_Beta_Notr,
                      xend   = SD_Beta_Nopl,
                      yend   = 1.03 * SD_Beta,
@@ -1075,7 +1163,7 @@ p_all <-
     annotate(geom = "point", x = 0.006, y = 0.15) +
     annotate(geom = "segment", x = 0.006, xend = 0.006, y = 0.25, yend = 1.03 * 0.15,
              arrow      = arrow(angle = 25, type = "closed", length = unit(0.011, "npc")),
-             linejoin   = 'round', colour = "#cf5c42") +
+             linejoin   = 'round', colour = "#b61909") +
     annotate(geom = "text", x = 0.006, y = 0.29,
              label = "Estimate\nwithout\ntracking", vjust = 0, hjust = 0.5,
              lineheight = 0.7, family = "Linux Biolinum O", size = 5) +
@@ -1083,12 +1171,13 @@ p_all <-
              label = "Actual\nestimate\n(incl. tracking)", vjust = 1, hjust = 0.5,
              lineheight = 0.7, family = "Linux Biolinum O", size = 5) +
     scale_x_log10() + scale_y_log10() +
-    scale_colour_gradient(low = "grey75", high = "#aa0000",
+    scale_colour_gradient(low = "black", high = "#FF0000",
                            name = bquote(ρ[paste(bar(z),",θ")]^2)) +
     theme(text          = element_text(family = "Linux Biolinum O"),
           axis.text.y   = element_text(size = 18),
           axis.text.x   = element_text(size = 18),
           axis.title    = element_text(size = 26),
+          panel.grid    = element_blank(),
           legend.position = "top",
           legend.title  = element_text(size = 20),
           legend.text   = element_text(size = 18, angle = 45, vjust = 1, hjust = 1),
