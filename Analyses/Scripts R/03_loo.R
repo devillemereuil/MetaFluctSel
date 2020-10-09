@@ -186,23 +186,25 @@ write_csv(desc, path = "../loo_rel_with_description.csv")
 
 graph_rel <-
     rel %>%
-    gather("Model", "Support", -Taxon) %>%
-    mutate(Model = recode(Model,
-                          FLAT     = "NoSel",
-                          VARINT   = "ConstOpt",
-                          IID      = "FluctOpt",
-                          AR1      = "FluctCorrOpt",
-                          EXPVARINT= "ConstDir",
-                          EXPIID   = "FluctDir",
-                          EXPAR1   = "FluctCorrDir"),
-           Model = factor(Model,
-                          levels = c("NoSel",
+    pivot_longer(-Taxon, names_to = "Model", values_to = "Support") %>%
+    mutate(Model = factor(Model,
+                          levels = c("ConstOpt", "FluctOpt", "FluctCorrOpt",
                                      "ConstDir", "FluctDir", "FluctCorrDir",
-                                     "ConstOpt", "FluctOpt", "FluctCorrOpt")))
+                                     "NoSel")))
 
 p <- ggplot(graph_rel) +
-     geom_col(aes(x = Taxon, y = Support, fill = Model), colour = "black", position = "stack") +
-     theme(text = element_text(family = "Noto Sans", size = 16))
-cairo_pdf("../../Figures/loo_rel.pdf")
+     geom_col(aes(x = Taxon, y = Support, fill = Model),
+              colour = "black",
+              position = "stack") +
+     scale_fill_manual(values = c("#e2cbcb", "#bc2b2b", "#bc0009",
+                                  "#cbcbe2", "#0079e2", "#112bbc",
+                                  "#ffffff"),
+                       guide = guide_legend(nrow = 3)) +
+     theme(text = element_text(family = "Noto Sans", size = 16),
+           legend.position = "top",
+           legend.title = element_text(face = "bold"),
+           legend.key.size = unit(1, "char"),
+           legend.text = element_text(family = "Noto Sans", size = 12))
+cairo_pdf("../../Figures/loo_rel.pdf", height = 8, width = 5)
 p
 dev.off()

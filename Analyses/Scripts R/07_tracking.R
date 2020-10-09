@@ -30,6 +30,12 @@ taxa <- readRDS("../../Data/taxa.rds")
 gradients <- readRDS("../gradients.rds")
 
 # List all mammal species (needed for spacer)
+list_birds <- 
+    ids %>% 
+    left_join(taxa) %>%
+    filter(Taxon == "Bird") %>%
+    chuck("ID") %>%
+    as.character()
 list_mammals <- 
     ids %>% 
     left_join(taxa) %>% 
@@ -142,7 +148,9 @@ add_spacer <- function(limits) {
 graph_corr <-
     track %>%
     filter(Keep_Theta) %>%
-    mutate(ID = as.factor(ID) %>% fct_rev() %>% fct_drop()) %>%
+    mutate(ID = factor(ID, levels =  c(list_birds, list_mammals)) %>%
+                fct_rev() %>%
+                fct_drop()) %>%
     select(ID, Corr_Theta, Pval_Theta, Corr_Beta, Pval_Beta) %>%
     unnest_legacy()
 
@@ -208,20 +216,38 @@ dev.off()
 
 p_corr_talk <-
     ggplot(graph_corr) +
-    geom_violin(aes(x = ID, y = Corr_Theta, fill = Pval < 0.05)) +
+    geom_hline(yintercept = 0, colour = "grey50", linetype = "dashed") +
+    geom_violin(aes(x = ID, y = Corr_Theta, fill = Pval_Theta < 0.05)) +
     coord_flip() +
+    annotate("text",
+             y = -1,
+             x = n_distinct(graph_corr[["ID"]]) + 1.5,
+             label = "Birds",
+             fontface = "bold",
+             size = 8,
+             hjust= 0,
+             family = "Noto Sans") +
+    annotate("text",
+             y = -1,
+             x = max(which(levels(graph_corr[["ID"]]) %in% list_mammals)) + 0.75,
+             label = "Mammals",
+             fontface = "bold",
+             size = 8,
+             hjust = 0,
+             family = "Noto Sans") +
     ylab("Plasticity - optimum correlation") + xlab("Dataset") +
     scale_fill_manual(values = c("#00557f", "#AA0000"), name = "Corr. ≠ 0?") +
+    scale_x_discrete(breaks = levels(graph_corr[["ID"]]),
+                     limits = add_spacer,
+                     expand = expansion(add = 1)) +
     theme(text = element_text(family = "Noto Sans", size = 16),
           axis.ticks.y = element_blank(),
           axis.text.y = element_blank(),
-          axis.title.y = element_blank())
-# ,
-#           axis.text.y  = element_text(size = 8),
-#           axis.text.x  = element_text(size = 14),
-#           axis.title   = element_text(size = 16))
+          axis.title.y = element_blank(),
+          panel.grid.major.y = element_blank())
+    
 
-cairo_pdf("../../Figures/Tracking_correlations_preso.pdf", height = 10, width = 5)
+cairo_pdf("../../Figures/Tracking_correlations_preso.pdf", height = 8, width = 5)
 plot(p_corr_talk + theme(legend.position = "none"))
 dev.off()
 
