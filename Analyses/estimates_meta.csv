@@ -1,11 +1,11 @@
-Param,Taxon,Est
-Mean_Theta,Bird,"-3.7 [-7.5, -0.7]"
-Mean_Theta,Mammal,"-1.75 [-6.4, 3]"
-Mean_Beta,Bird,"-0.165 [-0.26, -0.077]"
-Mean_Beta,Mammal,"-0.0866 [-0.22, 0.032]"
-SD_Theta,Bird,"1.89 [0.33, 4.1]"
-SD_Theta,Mammal,"3.14 [0.34, 6.7]"
-SD_Beta,Bird,"0.047 [0.018, 0.11]"
-SD_Beta,Mammal,"0.147 [0.056, 0.36]"
-Omega,Bird,"6.22 [3.2, 9.4]"
-Omega,Mammal,"4.94 [1.2, 9.2]"
+Parameter,Taxon,Estimate,Lower 95% CI,Upper 95% CI
+Mean_Theta,Bird,-3.7,-7.5,-0.7
+Mean_Theta,Mammal,-1.75,-6.4,3
+Mean_Beta,Bird,-0.165,-0.26,-0.077
+Mean_Beta,Mammal,-0.0866,-0.22,0.032
+SD_Theta,Bird,1.89,0.33,4.1
+SD_Theta,Mammal,3.14,0.34,6.7
+SD_Beta,Bird,0.047,0.018,0.11
+SD_Beta,Mammal,0.147,0.056,0.36
+Omega,Bird,6.22,3.2,9.4
+Omega,Mammal,4.94,1.2,9.2

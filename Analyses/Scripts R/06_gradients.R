@@ -405,8 +405,14 @@ saveRDS(est_meta, file = "../est_meta.rds", version = 2)
 
 out_meta <-
     est_meta %>%
-    mutate(Est = str_glue("{signif(Median, 3)} [{signif(Low, 2)}, {signif(Up, 2)}]")) %>%
-    select(Param, Taxon, Est)
+    mutate(Median = signif(Median, 3),
+           Low    = signif(Low, 2),
+           Up     = signif(Up, 2)) %>%
+    select(Parameter = Param,
+           Taxon,
+           Estimate = Median,
+           `Lower 95% CI` = Low,
+           `Upper 95% CI` = Up)
 write_csv(out_meta, path = "../estimates_meta.csv")
 
 ## ---------------------------------- Plotting the graphs of the gradients
