@@ -1,5 +1,5 @@
-Code and data for "Fluctuating optimum and temporally variable selection in the wild"
-=====================================================================================
+Code and data for "Fluctuating optimum and temporally variable selection on breeding date in birds and mammals"
+===============================================================================================================
 
 Content
 -------
